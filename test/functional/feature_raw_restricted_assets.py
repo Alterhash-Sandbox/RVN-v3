@@ -11,11 +11,13 @@ import math
 from pprint import pprint
 
 BURN_ADDRESSES = {
-    'issue_restricted': 'n1issueRestrictedXXXXXXXXXXXXZVT9V'
+    'issue_restricted':   'n1issueRestrictedXXXXXXXXXXXXZVT9V',
+    'reissue_restricted': 'n1ReissueAssetXXXXXXXXXXXXXXWG9NLd',
 }
 
 BURN_AMOUNTS = {
-    'issue_restricted': 1500
+    'issue_restricted': 1500,
+    'reissue_restricted': 100,
 }
 
 FEE_AMOUNT = 0.01
@@ -46,7 +48,7 @@ def get_tx_issue_hex(node, to_address, asset_name, \
                 'verifier_string':  verifier_string,
                 'units':            units,
                 'reissuable':       reissuable,
-                'has_ipfs':         has_ipfs
+                'has_ipfs':         has_ipfs,
             }
         }
     }
@@ -54,6 +56,40 @@ def get_tx_issue_hex(node, to_address, asset_name, \
         outputs[to_address]['issue_restricted']['ipfs_hash'] = ipfs_hash
     if len(owner_change_address) > 0:
         outputs[to_address]['issue_restricted']['owner_change_address'] = owner_change_address
+
+    tx_issue = node.createrawtransaction(rvn_inputs + owner_inputs, outputs)
+    tx_issue_signed = node.signrawtransaction(tx_issue)
+    tx_issue_hex = tx_issue_signed['hex']
+    return tx_issue_hex
+
+def get_tx_reissue_hex(node, to_address, asset_name, asset_quantity, \
+                     reissuable=1, verifier_string="", ipfs_hash="", owner_change_address=""):
+    change_address = node.getnewaddress()
+
+    rvn_unspent = next(u for u in node.listunspent() if u['amount'] > BURN_AMOUNTS['reissue_restricted'])
+    rvn_inputs = [{k: rvn_unspent[k] for k in ['txid', 'vout']}]
+
+    owner_asset_name = asset_name[1:] + '!'
+    owner_unspent = node.listmyassets(owner_asset_name, True)[owner_asset_name]['outpoints'][0]
+    owner_inputs = [{k: owner_unspent[k] for k in ['txid', 'vout']}]
+
+    outputs = {
+        BURN_ADDRESSES['reissue_restricted']: BURN_AMOUNTS['reissue_restricted'],
+        change_address: truncate(float(rvn_unspent['amount']) - BURN_AMOUNTS['reissue_restricted'] - FEE_AMOUNT),
+        to_address: {
+            'reissue_restricted': {
+                'asset_name':       asset_name,
+                'asset_quantity':   asset_quantity,
+                'reissuable':       reissuable,
+            }
+        }
+    }
+    if len(verifier_string) > 0:
+        outputs[to_address]['reissue_restricted']['verifier_string'] = verifier_string
+    if len(ipfs_hash) > 0:
+        outputs[to_address]['reissue_restricted']['ipfs_hash'] = ipfs_hash
+    if len(owner_change_address) > 0:
+        outputs[to_address]['reissue_restricted']['owner_change_address'] = owner_change_address
 
     tx_issue = node.createrawtransaction(rvn_inputs + owner_inputs, outputs)
     tx_issue_signed = node.signrawtransaction(tx_issue)
@@ -91,7 +127,8 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         n0.issue(base_asset_name)
         n0.generate(1)
 
-        txid = n0.sendrawtransaction(get_tx_issue_hex(n0, to_address, asset_name, qty, verifier))
+        hex = get_tx_issue_hex(n0, to_address, asset_name, qty, verifier)
+        txid = n0.sendrawtransaction(hex)
         n0.generate(1)
 
         #verify
@@ -104,10 +141,55 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(0, asset_data['has_ipfs'])
         assert_equal('true', asset_data['verifier_string'])
 
+    def reissue_restricted_test(self):
+        self.log.info("Testing raw reissue_restricted...")
+        n0 = self.nodes[0]
+
+        base_asset_name = "REISSUE_RESTRICTED_TEST"
+        asset_name = f"${base_asset_name}"
+        qty = 10000
+        verifier = "true"
+        to_address = n0.getnewaddress()
+
+        n0.issue(base_asset_name)
+        n0.generate(1)
+
+        n0.issuerestrictedasset(asset_name, qty, verifier, to_address)
+        n0.generate(1)
+
+        reissue_qty = 5000
+        reissuable = 0
+        qualifier = "#CYA"
+        reissue_verifier = qualifier[1:]
+        ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
+        owner_change_address = n0.getnewaddress()
+
+        n0.issuequalifierasset(qualifier)
+        n0.generate(1)
+        n0.addtagtoaddress(qualifier, to_address)
+        n0.generate(1)
+
+        hex = get_tx_reissue_hex(n0, to_address, asset_name, reissue_qty, reissuable, reissue_verifier, ipfs_hash, \
+                                 owner_change_address)
+        txid = n0.sendrawtransaction(hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(txid))
+        assert_equal(qty + reissue_qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
+        asset_data = n0.getassetdata(asset_name)
+        assert_equal(qty + reissue_qty, asset_data['amount'])
+        assert_equal(0, asset_data['units'])
+        assert_equal(0, asset_data['reissuable'])
+        assert_equal(1, asset_data['has_ipfs'])
+        assert_equal(ipfs_hash, asset_data['ipfs_hash'])
+        assert_equal(reissue_verifier, asset_data['verifier_string'])
+
     def run_test(self):
         self.activate_restricted_assets()
 
         self.issue_restricted_test()
+        self.reissue_restricted_test()
 
 if __name__ == '__main__':
     RawRestrictedAssetsTest().main()
