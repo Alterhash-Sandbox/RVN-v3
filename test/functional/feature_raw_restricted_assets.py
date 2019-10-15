@@ -91,8 +91,6 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         n0.issue(base_asset_name)
         n0.generate(1)
 
-        #... create, sign, and submit raw transactions then verify..
-        #
         txid = n0.sendrawtransaction(get_tx_issue_hex(n0, to_address, asset_name, qty, verifier))
         n0.generate(1)
 
