@@ -123,11 +123,17 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         qty = 10000
         verifier = "true"
         to_address = n0.getnewaddress()
+        units = 2
+        reissuable = 0
+        has_ipfs = 1
+        ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
+        owner_change_address = n0.getnewaddress()
 
         n0.issue(base_asset_name)
         n0.generate(1)
 
-        hex = get_tx_issue_hex(n0, to_address, asset_name, qty, verifier)
+        hex = get_tx_issue_hex(n0, to_address, asset_name, qty, verifier, \
+                               units, reissuable, has_ipfs, ipfs_hash, owner_change_address)
         txid = n0.sendrawtransaction(hex)
         n0.generate(1)
 
@@ -136,10 +142,12 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
         asset_data = n0.getassetdata(asset_name)
         assert_equal(qty, asset_data['amount'])
-        assert_equal(0, asset_data['units'])
-        assert_equal(1, asset_data['reissuable'])
-        assert_equal(0, asset_data['has_ipfs'])
-        assert_equal('true', asset_data['verifier_string'])
+        assert_equal(verifier, asset_data['verifier_string'])
+        assert_equal(units, asset_data['units'])
+        assert_equal(reissuable, asset_data['reissuable'])
+        assert_equal(has_ipfs, asset_data['has_ipfs'])
+        assert_equal(ipfs_hash, asset_data['ipfs_hash'])
+        assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
 
     def reissue_restricted_test(self):
         self.log.info("Testing raw reissue_restricted...")
@@ -161,6 +169,7 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         reissuable = 0
         qualifier = "#CYA"
         reissue_verifier = qualifier[1:]
+        has_ipfs = 1
         ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
         owner_change_address = n0.getnewaddress()
 
@@ -179,11 +188,21 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(qty + reissue_qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
         asset_data = n0.getassetdata(asset_name)
         assert_equal(qty + reissue_qty, asset_data['amount'])
-        assert_equal(0, asset_data['units'])
-        assert_equal(0, asset_data['reissuable'])
-        assert_equal(1, asset_data['has_ipfs'])
-        assert_equal(ipfs_hash, asset_data['ipfs_hash'])
+        assert_equal(reissuable, asset_data['reissuable'])
         assert_equal(reissue_verifier, asset_data['verifier_string'])
+        assert_equal(has_ipfs, asset_data['has_ipfs'])
+        assert_equal(ipfs_hash, asset_data['ipfs_hash'])
+        assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
+
+    # def issue_qualifier_test(self):
+    #     self.log.info("Testing raw issue_qualifier...")
+    #     n0 = self.nodes[0]
+    #
+    #     qualifier_name = "#UROK"
+    #     qty = 3
+    #     to_address = n0.getnewaddress
+
+
 
     def run_test(self):
         self.activate_restricted_assets()
