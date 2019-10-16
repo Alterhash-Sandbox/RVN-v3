@@ -13,11 +13,15 @@ from pprint import pprint
 BURN_ADDRESSES = {
     'issue_restricted':   'n1issueRestrictedXXXXXXXXXXXXZVT9V',
     'reissue_restricted': 'n1ReissueAssetXXXXXXXXXXXXXXWG9NLd',
+    'issue_qualifier':    'n1issueQuaLifierXXXXXXXXXXXXUysLTj',
+    'issue_subqualifier': 'n1issueSubQuaLifierXXXXXXXXXYffPLh',
 }
 
 BURN_AMOUNTS = {
-    'issue_restricted': 1500,
-    'reissue_restricted': 100,
+    'issue_restricted':   1500,
+    'reissue_restricted':  100,
+    'issue_qualifier':    1000,
+    'issue_subqualifier':  100,
 }
 
 FEE_AMOUNT = 0.01
@@ -96,6 +100,43 @@ def get_tx_reissue_hex(node, to_address, asset_name, asset_quantity, \
     tx_issue_hex = tx_issue_signed['hex']
     return tx_issue_hex
 
+def get_tx_issue_qualifier_hex(node, to_address, asset_name, \
+                               asset_quantity=1, has_ipfs=0, ipfs_hash="", root_change_address=""):
+    change_address = node.getnewaddress()
+
+    is_sub_qualifier = len(asset_name.split('/')) > 1
+
+    rvn_unspent = next(u for u in node.listunspent() if u['amount'] > BURN_AMOUNTS['issue_qualifier'])
+    rvn_inputs = [{k: rvn_unspent[k] for k in ['txid', 'vout']}]
+
+    root_inputs = []
+    if is_sub_qualifier:
+        root_asset_name = asset_name.split('/')[0]
+        root_unspent = node.listmyassets(root_asset_name, True)[root_asset_name]['outpoints'][0]
+        root_inputs = [{k: root_unspent[k] for k in ['txid', 'vout']}]
+
+    burn_address = BURN_ADDRESSES['issue_subqualifier'] if is_sub_qualifier else BURN_ADDRESSES['issue_qualifier']
+    burn_amount = BURN_AMOUNTS['issue_subqualifier'] if is_sub_qualifier else BURN_AMOUNTS['issue_qualifier']
+    outputs = {
+        burn_address: burn_amount,
+        change_address: truncate(float(rvn_unspent['amount']) - burn_amount - FEE_AMOUNT),
+        to_address: {
+            'issue_qualifier': {
+                'asset_name':      asset_name,
+                'asset_quantity':  asset_quantity,
+                'has_ipfs':        has_ipfs,
+            }
+        }
+    }
+    if has_ipfs == 1:
+        outputs[to_address]['issue_qualifier']['ipfs_hash'] = ipfs_hash
+    if len(root_change_address) > 0:
+        outputs[to_address]['issue_qualifier']['root_change_address'] = root_change_address
+
+    tx_issue = node.createrawtransaction(rvn_inputs + root_inputs, outputs)
+    tx_issue_signed = node.signrawtransaction(tx_issue)
+    tx_issue_hex = tx_issue_signed['hex']
+    return tx_issue_hex
 
 class RawRestrictedAssetsTest(RavenTestFramework):
     def set_test_params(self):
@@ -194,21 +235,61 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(ipfs_hash, asset_data['ipfs_hash'])
         assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
 
-    # def issue_qualifier_test(self):
-    #     self.log.info("Testing raw issue_qualifier...")
-    #     n0 = self.nodes[0]
-    #
-    #     qualifier_name = "#UROK"
-    #     qty = 3
-    #     to_address = n0.getnewaddress
+    def issue_qualifier_test(self):
+        self.log.info("Testing raw issue_qualifier...")
+        n0 = self.nodes[0]
 
+        asset_name = "#UROK"
+        qty = 1  # TODO: this should work w/ qty > 1 after fix is made to detect root change qty...
+        to_address = n0.getnewaddress()
+        has_ipfs = 1
+        ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
 
+        #### ROOT QUALIFIER
+        hex = get_tx_issue_qualifier_hex(n0, to_address, asset_name, qty, has_ipfs, ipfs_hash)
+        txid = n0.sendrawtransaction(hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(txid))
+        assert_equal(qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
+        asset_data = n0.getassetdata(asset_name)
+        assert_equal(qty, asset_data['amount'])
+        assert_equal(0, asset_data['units'])
+        assert_equal(0, asset_data['reissuable'])
+        assert_equal(has_ipfs, asset_data['has_ipfs'])
+        assert_equal(ipfs_hash, asset_data['ipfs_hash'])
+
+        sub_asset_name = "#UROK/#IGUESS"
+        sub_qty = 5
+        sub_to_address = n0.getnewaddress()
+        sub_has_ipfs = 1
+        sub_ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
+        root_change_address = n0.getnewaddress()
+
+        #### SUB-QUALIFIER
+        sub_hex = get_tx_issue_qualifier_hex(n0, sub_to_address, sub_asset_name, sub_qty, sub_has_ipfs, sub_ipfs_hash, \
+                                             root_change_address)
+        sub_txid = n0.sendrawtransaction(sub_hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(sub_txid))
+        assert_equal(sub_qty, n0.listmyassets(sub_asset_name, True)[sub_asset_name]['balance'])
+        asset_data = n0.getassetdata(sub_asset_name)
+        assert_equal(sub_qty, asset_data['amount'])
+        assert_equal(0, asset_data['units'])
+        assert_equal(0, asset_data['reissuable'])
+        assert_equal(sub_has_ipfs, asset_data['has_ipfs'])
+        assert_equal(sub_ipfs_hash, asset_data['ipfs_hash'])
+        assert_equal(qty, n0.listassetbalancesbyaddress(root_change_address)[asset_name])
 
     def run_test(self):
         self.activate_restricted_assets()
 
         self.issue_restricted_test()
         self.reissue_restricted_test()
+        self.issue_qualifier_test()
 
 if __name__ == '__main__':
     RawRestrictedAssetsTest().main()
