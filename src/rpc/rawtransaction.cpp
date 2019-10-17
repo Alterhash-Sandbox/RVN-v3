@@ -369,14 +369,21 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "    reissue_restricted     " + i64tostr(GetBurnAmount(AssetType::REISSUE) / COIN) + " to " + GetBurnAddress(AssetType::REISSUE) + "\n"
             "    issue_qualifier       " + i64tostr(GetBurnAmount(AssetType::QUALIFIER) / COIN) + " to " + GetBurnAddress(AssetType::QUALIFIER) + "\n"
             "    issue_qualifier (sub)  " + i64tostr(GetBurnAmount(AssetType::SUB_QUALIFIER) / COIN) + " to " + GetBurnAddress(AssetType::SUB_QUALIFIER) + "\n"
+            "    tag_addresses          " + "0.1 (per address) to " + GetBurnAddress(AssetType::NULL_ADD_QUALIFIER) + "\n"
+            "    untag_addresses        " + "0.1 (per address) to " + GetBurnAddress(AssetType::NULL_ADD_QUALIFIER) + "\n"
 
-            "\nOwnership:\n"
-            "  These operations require an ownership token input for the root asset being operated upon:\n"
-            "    issue_unique\n"
-            "    reissue\n"
-            "    issue_restricted\n"
-            "    reissue_restricted\n"
-            "    issue_qualifier (root token when issuing subqualifier)"
+            "\nAssets For Authorization:\n"
+            "  These operations require a specific asset input for authorization:\n"
+            "    Root Owner Token:\n"
+            "      reissue\n"
+            "      issue_unique\n"
+            "      issue_restricted\n"
+            "      reissue_restricted\n"
+            "    Root Qualifier Token:\n"
+            "      issue_qualifier (when issuing subqualifier)\n"
+            "    Qualifier Token:\n"
+            "      tag_addresses\n"
+            "      untag_addresses\n"
 
             "\nOutput Ordering:\n"
             "  Asset operations require the following:\n"
@@ -499,6 +506,27 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "               \"root_change_address\"        (string, optional) Only applies when issuing subqualifiers.\n"
             "                                                The address where the root qualifier will be sent.\n"
             "                                                If not specified, it will be sent to the output address.\n"
+            "               \"change_quantity\":\"qty\"    (numeric, optional) the asset change amount (defaults to 1)\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
+            "         {                                 (object) A json object describing addresses to be tagged.\n"
+            "                                             The address in the key will used as the asset change address.\n"
+            "           \"tag_addresses\":\n"
+            "             {\n"
+            "               \"qualifier\":\"qualifier\",          (string, required) a qualifier name (starts with '#')\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be tagged\n"
+            "               \"change_quantity\":\"qty\",          (numeric, optional) the asset change amount (defaults to 1)\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
+            "         {                                 (object) A json object describing addresses to be untagged.\n"
+            "                                             The address in the key will be used as the asset change address.\n"
+            "           \"untag_addresses\":\n"
+            "             {\n"
+            "               \"qualifier\":\"qualifier\",          (string, required) a qualifier name (starts with '#')\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be untagged\n"
+            "               \"change_quantity\":\"qty\",          (numeric, optional) the asset change amount (defaults to 1)\n"
             "             }\n"
             "         }\n"
             "           or\n"
@@ -1219,6 +1247,14 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
                     if (nAmount < QUALIFIER_ASSET_MIN_AMOUNT || nAmount > QUALIFIER_ASSET_MAX_AMOUNT)
                         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, qualifiers are only allowed to be issued in quantities between 1 and 10.");
 
+                    CAmount changeQty = COIN;
+                    const UniValue& change_qty = find_value(assetData, "change_quantity");
+                    if (!change_qty.isNull()) {
+                        if (!change_qty.isNum() || AmountFromValue(change_qty) < COIN)
+                            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, change_amount must be a positive number");
+                        changeQty = AmountFromValue(change_qty);
+                    }
+
                     int units = 0;
                     bool reissuable = false;
 
@@ -1244,9 +1280,7 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
                         else
                             root_asset_transfer_script = GetScriptForDestination(destination);
 
-                        // TODO: need to find the amount of the root input so we can output the same number
-                        //       (don't have the luxury of assuming it's always 1 as with owner tokens)
-                        CAssetTransfer transfer_root(GetParentName(strAssetName), OWNER_ASSET_AMOUNT);
+                        CAssetTransfer transfer_root(GetParentName(strAssetName), changeQty);
                         transfer_root.ConstructTransaction(root_asset_transfer_script);
                     }
 
@@ -1261,8 +1295,54 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
                         rawTx.vout.push_back(root_change);
                     rawTx.vout.push_back(issue);
 
+                } else if (assetKey_ == "tag_addresses" || assetKey_ == "untag_addresses") {
+                    int8_t tag_op = assetKey_ == "tag_addresses" ? 1 : 0;
+
+                    if (asset_[0].type() != UniValue::VOBJ)
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, the format must follow { \"[tag|untag]_addresses\": {\"key\": value}, ...}"));
+                    auto assetData = asset_.getValues()[0].get_obj();
+
+                    const UniValue& qualifier = find_value(assetData, "qualifier");
+                    if (!qualifier.isStr())
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing data for key: qualifier");
+                    std::string strQualifier = qualifier.get_str();
+                    if (!IsAssetNameAQualifier(strQualifier))
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, a valid qualifier name must be provided, e.g. #MY_QUALIFIER");
+
+                    const UniValue& addresses = find_value(assetData, "addresses");
+                    if (!addresses.isArray() || addresses.size() < 1 || addresses.size() > 10)
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, value for key address must be an array of size 1 to 10");
+                    for (int i = 0; i < (int)addresses.size(); i++) {
+                        if (!IsValidDestinationString(addresses[i].get_str()))
+                            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, supplied address is not a valid Ravencoin address");
+                    }
+
+                    CAmount changeQty = COIN;
+                    const UniValue& change_qty = find_value(assetData, "change_quantity");
+                    if (!change_qty.isNull()) {
+                        if (!change_qty.isNum() || AmountFromValue(change_qty) < COIN)
+                            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, change_amount must be a positive number");
+                        changeQty = AmountFromValue(change_qty);
+                    }
+
+                    // change
+                    CScript change_script = GetScriptForDestination(destination);
+                    CAssetTransfer transfer_change(strQualifier, changeQty);
+                    transfer_change.ConstructTransaction(change_script);
+                    CTxOut out_change(0, change_script);
+                    rawTx.vout.push_back(out_change);
+
+                    // tagging
+                    for (int i = 0; i < (int)addresses.size(); i++) {
+                        CScript tag_string_script = GetScriptForNullAssetDataDestination(DecodeDestination(addresses[i].get_str()));
+                        CNullAssetTxData tagString(strQualifier, tag_op);
+                        tagString.ConstructTransaction(tag_string_script);
+                        CTxOut out_tag(0, tag_string_script);
+                        rawTx.vout.push_back(out_tag);
+                    }
+
                 } else {
-                    throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, unknown output type (should be 'issue', 'issue_restricted', 'reissue', 'reissue_restricted', 'issue_qualifier', 'transfer' or 'transferwithmessage'): " + assetKey_));
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, unknown output type: " + assetKey_));
                 }
             } else {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, Output must be of the type object"));

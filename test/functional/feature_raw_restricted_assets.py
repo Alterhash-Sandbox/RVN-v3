@@ -15,6 +15,7 @@ BURN_ADDRESSES = {
     'reissue_restricted': 'n1ReissueAssetXXXXXXXXXXXXXXWG9NLd',
     'issue_qualifier':    'n1issueQuaLifierXXXXXXXXXXXXUysLTj',
     'issue_subqualifier': 'n1issueSubQuaLifierXXXXXXXXXYffPLh',
+    'tag_address':        'n1addTagBurnXXXXXXXXXXXXXXXXX5oLMH',
 }
 
 BURN_AMOUNTS = {
@@ -22,6 +23,7 @@ BURN_AMOUNTS = {
     'reissue_restricted':  100,
     'issue_qualifier':    1000,
     'issue_subqualifier':  100,
+    'tag_address':           0.1,
 }
 
 FEE_AMOUNT = 0.01
@@ -101,7 +103,7 @@ def get_tx_reissue_hex(node, to_address, asset_name, asset_quantity, \
     return tx_issue_hex
 
 def get_tx_issue_qualifier_hex(node, to_address, asset_name, \
-                               asset_quantity=1, has_ipfs=0, ipfs_hash="", root_change_address=""):
+                               asset_quantity=1, has_ipfs=0, ipfs_hash="", root_change_address="", change_qty=1):
     change_address = node.getnewaddress()
 
     is_sub_qualifier = len(asset_name.split('/')) > 1
@@ -132,6 +134,8 @@ def get_tx_issue_qualifier_hex(node, to_address, asset_name, \
         outputs[to_address]['issue_qualifier']['ipfs_hash'] = ipfs_hash
     if len(root_change_address) > 0:
         outputs[to_address]['issue_qualifier']['root_change_address'] = root_change_address
+    if change_qty > 1:
+        outputs[to_address]['issue_qualifier']['change_quantity'] = change_qty
 
     tx_issue = node.createrawtransaction(rvn_inputs + root_inputs, outputs)
     tx_issue_signed = node.signrawtransaction(tx_issue)
@@ -169,6 +173,37 @@ def get_tx_transfer_hex(node, to_address, asset_name, asset_quantity):
     tx_transfer_signed = node.signrawtransaction(tx_transfer)
     tx_transfer_hex = tx_transfer_signed['hex']
     return tx_transfer_hex
+
+def get_tx_tag_address_hex(node, op, qualifier_name, tag_addresses, qualifier_change_address, \
+                           change_qty=1):
+    change_address = node.getnewaddress()
+
+    burn_amount = truncate(float(BURN_AMOUNTS['tag_address'] * len(tag_addresses)))
+
+    rvn_unspent = next(u for u in node.listunspent() if u['amount'] > burn_amount)
+    rvn_inputs = [{k: rvn_unspent[k] for k in ['txid', 'vout']}]
+
+    qualifier_unspent = node.listmyassets(qualifier_name, True)[qualifier_name]['outpoints'][0]
+    qualifier_inputs = [{k: qualifier_unspent[k] for k in ['txid', 'vout']}]
+
+    outputs = {
+        BURN_ADDRESSES['tag_address']: burn_amount,
+        change_address: truncate(float(rvn_unspent['amount']) - burn_amount - FEE_AMOUNT),
+        qualifier_change_address: {
+            f"{op}_addresses": {
+                'qualifier': qualifier_name,
+                'addresses': tag_addresses,
+            }
+        },
+    }
+    if change_qty > 1:
+        outputs[qualifier_change_address][f"{op}_addresses"]['change_quantity'] = change_qty
+
+    tx_tag = node.createrawtransaction(rvn_inputs + qualifier_inputs, outputs)
+    tx_tag_signed = node.signrawtransaction(tx_tag)
+    tx_tag_hex = tx_tag_signed['hex']
+    return tx_tag_hex
+
 
 class RawRestrictedAssetsTest(RavenTestFramework):
     def set_test_params(self):
@@ -272,7 +307,7 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         n0 = self.nodes[0]
 
         asset_name = "#UROK"
-        qty = 1  # TODO: this should work w/ qty > 1 after fix is made to detect root change qty...
+        qty = 2
         to_address = n0.getnewaddress()
         has_ipfs = 1
         ipfs_hash = "QmcvyefkqQX3PpjpY5L8B2yMd47XrVwAipr6cxUt2zvYU8"
@@ -301,7 +336,7 @@ class RawRestrictedAssetsTest(RavenTestFramework):
 
         #### SUB-QUALIFIER
         sub_hex = get_tx_issue_qualifier_hex(n0, sub_to_address, sub_asset_name, sub_qty, sub_has_ipfs, sub_ipfs_hash, \
-                                             root_change_address)
+                                             root_change_address, qty)
         sub_txid = n0.sendrawtransaction(sub_hex)
         n0.generate(1)
 
@@ -339,6 +374,48 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(qty - xfer_qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
         assert_equal(xfer_qty, n1.listassetbalancesbyaddress(n1_address)[asset_name])
 
+    def address_tagging_test(self):
+        self.log.info("Testing address tagging/untagging...")
+        n0 = self.nodes[0]
+
+        qualifier_name = "#LGTM"
+        qty = 2
+        issue_address = n0.getnewaddress()
+
+        issue_hex = get_tx_issue_qualifier_hex(n0, issue_address, qualifier_name, qty)
+        n0.sendrawtransaction(issue_hex)
+        n0.generate(1)
+
+        tag_addresses = [n0.getnewaddress(), n0.getnewaddress(), n0.getnewaddress()]
+
+        #verify
+        for tag_address in tag_addresses:
+            assert(not n0.checkaddresstag(tag_address, qualifier_name))
+
+        #tag
+        change_address = n0.getnewaddress()
+        tag_hex = get_tx_tag_address_hex(n0, "tag", qualifier_name, tag_addresses, change_address, 2)
+        tag_txid = n0.sendrawtransaction(tag_hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(tag_txid))
+        for tag_address in tag_addresses:
+            assert(n0.checkaddresstag(tag_address, qualifier_name))
+        assert_equal(qty, n0.listassetbalancesbyaddress(change_address)[qualifier_name])
+
+        #untag
+        change_address = n0.getnewaddress()
+        tag_hex = get_tx_tag_address_hex(n0, "untag", qualifier_name, tag_addresses, change_address, 2)
+        tag_txid = n0.sendrawtransaction(tag_hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(tag_txid))
+        for tag_address in tag_addresses:
+            assert(not n0.checkaddresstag(tag_address, qualifier_name))
+        assert_equal(qty, n0.listassetbalancesbyaddress(change_address)[qualifier_name])
+
     def run_test(self):
         self.activate_restricted_assets()
 
@@ -346,6 +423,7 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         self.reissue_restricted_test()
         self.issue_qualifier_test()
         self.transfer_qualifier_test()
+        self.address_tagging_test()
 
 if __name__ == '__main__':
     RawRestrictedAssetsTest().main()
