@@ -138,6 +138,38 @@ def get_tx_issue_qualifier_hex(node, to_address, asset_name, \
     tx_issue_hex = tx_issue_signed['hex']
     return tx_issue_hex
 
+def get_tx_transfer_hex(node, to_address, asset_name, asset_quantity):
+    change_address = node.getnewaddress()
+    asset_change_address = node.getnewaddress()
+
+    rvn_unspent = next(u for u in node.listunspent() if u['amount'] > FEE_AMOUNT)
+    rvn_inputs = [{k: rvn_unspent[k] for k in ['txid', 'vout']}]
+
+    asset_unspent = node.listmyassets(asset_name, True)[asset_name]['outpoints'][0]
+    asset_unspent_qty = asset_unspent['amount']
+    asset_inputs = [{k: asset_unspent[k] for k in ['txid', 'vout']}]
+
+
+    outputs = {
+        change_address: truncate(float(rvn_unspent['amount']) - FEE_AMOUNT),
+        to_address: {
+            'transfer': {
+                asset_name: asset_quantity
+            }
+        }
+    }
+    if asset_unspent_qty > asset_quantity:
+        outputs[asset_change_address] = {
+            'transfer': {
+                asset_name: asset_unspent_qty - asset_quantity
+            }
+        }
+
+    tx_transfer = node.createrawtransaction(rvn_inputs + asset_inputs, outputs)
+    tx_transfer_signed = node.signrawtransaction(tx_transfer)
+    tx_transfer_hex = tx_transfer_signed['hex']
+    return tx_transfer_hex
+
 class RawRestrictedAssetsTest(RavenTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
@@ -284,12 +316,36 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         assert_equal(sub_ipfs_hash, asset_data['ipfs_hash'])
         assert_equal(qty, n0.listassetbalancesbyaddress(root_change_address)[asset_name])
 
+    def transfer_qualifier_test(self):
+        self.log.info("Testing raw transfer qualifier...")
+        n0, n1 = self.nodes[0], self.nodes[1]
+
+        asset_name = "#XFERME"
+        qty = 5
+        n0_address = n0.getnewaddress()
+
+        hex = get_tx_issue_qualifier_hex(n0, n0_address, asset_name, qty)
+        txid = n0.sendrawtransaction(hex)
+        n0.generate(1)
+
+        n1_address = n1.getnewaddress()
+        xfer_qty = 2
+        hex = get_tx_transfer_hex(n0, n1_address, asset_name, xfer_qty)
+        txid = n0.sendrawtransaction(hex)
+        n0.generate(1)
+        self.sync_all()
+
+        #verify
+        assert_equal(qty - xfer_qty, n0.listmyassets(asset_name, True)[asset_name]['balance'])
+        assert_equal(xfer_qty, n1.listassetbalancesbyaddress(n1_address)[asset_name])
+
     def run_test(self):
         self.activate_restricted_assets()
 
         self.issue_restricted_test()
         self.reissue_restricted_test()
         self.issue_qualifier_test()
+        self.transfer_qualifier_test()
 
 if __name__ == '__main__':
     RawRestrictedAssetsTest().main()
