@@ -371,6 +371,10 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "    issue_qualifier (sub)  " + i64tostr(GetBurnAmount(AssetType::SUB_QUALIFIER) / COIN) + " to " + GetBurnAddress(AssetType::SUB_QUALIFIER) + "\n"
             "    tag_addresses          " + "0.1 (per address) to " + GetBurnAddress(AssetType::NULL_ADD_QUALIFIER) + "\n"
             "    untag_addresses        " + "0.1 (per address) to " + GetBurnAddress(AssetType::NULL_ADD_QUALIFIER) + "\n"
+            "    freeze_addresses         0\n"
+            "    unfreeze_addresses       0\n"
+            "    freeze_asset             0\n"
+            "    unfreeze_asset           0\n"
 
             "\nAssets For Authorization:\n"
             "  These operations require a specific asset input for authorization:\n"
@@ -379,6 +383,10 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "      issue_unique\n"
             "      issue_restricted\n"
             "      reissue_restricted\n"
+            "      freeze_addresses\n"
+            "      unfreeze_addresses\n"
+            "      freeze_asset\n"
+            "      unfreeze_asset\n"
             "    Root Qualifier Token:\n"
             "      issue_qualifier (when issuing subqualifier)\n"
             "    Qualifier Token:\n"
@@ -515,7 +523,7 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "           \"tag_addresses\":\n"
             "             {\n"
             "               \"qualifier\":\"qualifier\",          (string, required) a qualifier name (starts with '#')\n"
-            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be tagged\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be tagged (up to 10)\n"
             "               \"change_quantity\":\"qty\",          (numeric, optional) the asset change amount (defaults to 1)\n"
             "             }\n"
             "         }\n"
@@ -525,8 +533,26 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "           \"untag_addresses\":\n"
             "             {\n"
             "               \"qualifier\":\"qualifier\",          (string, required) a qualifier name (starts with '#')\n"
-            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be untagged\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be untagged (up to 10)\n"
             "               \"change_quantity\":\"qty\",          (numeric, optional) the asset change amount (defaults to 1)\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
+            "         {                                 (object) A json object describing addresses to be frozen.\n"
+            "                                             The address in the key will used as the owner change address.\n"
+            "           \"freeze_addresses\":\n"
+            "             {\n"
+            "               \"asset_name\":\"asset_name\",        (string, required) a restricted asset name (starts with '$')\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be frozen (up to 10)\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
+            "         {                                 (object) A json object describing addresses to be frozen.\n"
+            "                                             The address in the key will be used as the owner change address.\n"
+            "           \"unfreeze_addresses\":\n"
+            "             {\n"
+            "               \"asset_name\":\"asset_name\",        (string, required) a restricted asset name (starts with '$')\n"
+            "               \"addresses\":[\"addr\", ...],        (array, required) the addresses to be untagged (up to 10)\n"
             "             }\n"
             "         }\n"
             "           or\n"
@@ -1339,6 +1365,43 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
                         tagString.ConstructTransaction(tag_string_script);
                         CTxOut out_tag(0, tag_string_script);
                         rawTx.vout.push_back(out_tag);
+                    }
+                } else if (assetKey_ == "freeze_addresses" || assetKey_ == "unfreeze_addresses") {
+                    int8_t freeze_op = assetKey_ == "freeze_addresses" ? 1 : 0;
+
+                    if (asset_[0].type() != UniValue::VOBJ)
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, the format must follow { \"[freeze|unfreeze]_addresses\": {\"key\": value}, ...}"));
+                    auto assetData = asset_.getValues()[0].get_obj();
+
+                    const UniValue& asset_name = find_value(assetData, "asset_name");
+                    if (!asset_name.isStr())
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing data for key: asset_name");
+                    std::string strAssetName = asset_name.get_str();
+                    if (!IsAssetNameAnRestricted(strAssetName))
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, a valid restricted asset name must be provided, e.g. $MY_ASSET");
+
+                    const UniValue& addresses = find_value(assetData, "addresses");
+                    if (!addresses.isArray() || addresses.size() < 1 || addresses.size() > 10)
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, value for key address must be an array of size 1 to 10");
+                    for (int i = 0; i < (int)addresses.size(); i++) {
+                        if (!IsValidDestinationString(addresses[i].get_str()))
+                            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, supplied address is not a valid Ravencoin address");
+                    }
+
+                    // owner change
+                    CScript change_script = GetScriptForDestination(destination);
+                    CAssetTransfer transfer_change(RestrictedNameToOwnerName(strAssetName), OWNER_ASSET_AMOUNT);
+                    transfer_change.ConstructTransaction(change_script);
+                    CTxOut out_change(0, change_script);
+                    rawTx.vout.push_back(out_change);
+
+                    // freezing
+                    for (int i = 0; i < (int)addresses.size(); i++) {
+                        CScript freeze_string_script = GetScriptForNullAssetDataDestination(DecodeDestination(addresses[i].get_str()));
+                        CNullAssetTxData freezeString(strAssetName, freeze_op);
+                        freezeString.ConstructTransaction(freeze_string_script);
+                        CTxOut out_freeze(0, freeze_string_script);
+                        rawTx.vout.push_back(out_freeze);
                     }
 
                 } else {
