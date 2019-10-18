@@ -556,6 +556,22 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
             "             }\n"
             "         }\n"
             "           or\n"
+            "         {                                 (object) A json object describing an asset to be frozen.\n"
+            "                                             The address in the key will used as the owner change address.\n"
+            "           \"freeze_asset\":\n"
+            "             {\n"
+            "               \"asset_name\":\"asset_name\",        (string, required) a restricted asset name (starts with '$')\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
+            "         {                                 (object) A json object describing an asset to be frozen.\n"
+            "                                             The address in the key will be used as the owner change address.\n"
+            "           \"unfreeze_asset\":\n"
+            "             {\n"
+            "               \"asset_name\":\"asset_name\",        (string, required) a restricted asset name (starts with '$')\n"
+            "             }\n"
+            "         }\n"
+            "           or\n"
             "       \"data\": \"hex\"                       (string, required) The key is \"data\", the value is hex encoded data\n"
             "       ,...\n"
             "     }\n"
@@ -1403,6 +1419,33 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
                         CTxOut out_freeze(0, freeze_string_script);
                         rawTx.vout.push_back(out_freeze);
                     }
+                } else if (assetKey_ == "freeze_asset" || assetKey_ == "unfreeze_asset") {
+                    int8_t freeze_op = assetKey_ == "freeze_asset" ? 1 : 0;
+
+                    if (asset_[0].type() != UniValue::VOBJ)
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, the format must follow { \"[freeze|unfreeze]_asset\": {\"key\": value}, ...}"));
+                    auto assetData = asset_.getValues()[0].get_obj();
+
+                    const UniValue& asset_name = find_value(assetData, "asset_name");
+                    if (!asset_name.isStr())
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing data for key: asset_name");
+                    std::string strAssetName = asset_name.get_str();
+                    if (!IsAssetNameAnRestricted(strAssetName))
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, a valid restricted asset name must be provided, e.g. $MY_ASSET");
+
+                    // owner change
+                    CScript change_script = GetScriptForDestination(destination);
+                    CAssetTransfer transfer_change(RestrictedNameToOwnerName(strAssetName), OWNER_ASSET_AMOUNT);
+                    transfer_change.ConstructTransaction(change_script);
+                    CTxOut out_change(0, change_script);
+                    rawTx.vout.push_back(out_change);
+
+                    // freezing
+                    CScript freeze_string_script;
+                    CNullAssetTxData freezeString(strAssetName, freeze_op);
+                    freezeString.ConstructGlobalRestrictionTransaction(freeze_string_script);
+                    CTxOut out_freeze(0, freeze_string_script);
+                    rawTx.vout.push_back(out_freeze);
 
                 } else {
                     throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, unknown output type: " + assetKey_));

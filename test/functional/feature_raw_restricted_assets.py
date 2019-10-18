@@ -229,6 +229,31 @@ def get_tx_freeze_address_hex(node, op, asset_name, freeze_addresses, owner_chan
     tx_freeze_hex = tx_freeze_signed['hex']
     return tx_freeze_hex
 
+# get_tx_freeze_asset_hex(n0, "freeze", asset_name, owner_change_address)
+def get_tx_freeze_asset_hex(node, op, asset_name, owner_change_address):
+    change_address = node.getnewaddress()
+
+    rvn_unspent = next(u for u in node.listunspent() if u['amount'] > FEE_AMOUNT)
+    rvn_inputs = [{k: rvn_unspent[k] for k in ['txid', 'vout']}]
+
+    owner_asset_name = asset_name[1:] + '!'
+    owner_unspent = node.listmyassets(owner_asset_name, True)[owner_asset_name]['outpoints'][0]
+    owner_inputs = [{k: owner_unspent[k] for k in ['txid', 'vout']}]
+
+    outputs = {
+        change_address: truncate(float(rvn_unspent['amount']) - FEE_AMOUNT),
+        owner_change_address: {
+            f"{op}_asset": {
+                'asset_name': asset_name,
+            }
+        },
+    }
+
+    tx_freeze = node.createrawtransaction(rvn_inputs + owner_inputs, outputs)
+    tx_freeze_signed = node.signrawtransaction(tx_freeze)
+    tx_freeze_hex = tx_freeze_signed['hex']
+    return tx_freeze_hex
+
 class RawRestrictedAssetsTest(RavenTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
@@ -486,6 +511,47 @@ class RawRestrictedAssetsTest(RavenTestFramework):
             assert(not n0.checkaddressrestriction(freeze_address, asset_name))
         assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
 
+    def asset_freezing_test(self):
+        self.log.info("Testing asset freezing/unfreezing...")
+        n0 = self.nodes[0]
+
+        base_asset_name = "ASSET_FREEZING_TEST"
+        asset_name = f"${base_asset_name}"
+        qty = 10000
+        verifier = "true"
+        issue_address = n0.getnewaddress()
+
+        n0.issue(base_asset_name)
+        n0.generate(1)
+
+        n0.issuerestrictedasset(asset_name, qty, verifier, issue_address)
+        n0.generate(1)
+
+        #verify
+        assert(not n0.checkglobalrestriction(asset_name))
+
+        #freeze
+        owner_change_address = n0.getnewaddress()
+        freeze_hex = get_tx_freeze_asset_hex(n0, "freeze", asset_name, owner_change_address)
+        freeze_txid = n0.sendrawtransaction(freeze_hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(freeze_txid))
+        assert(n0.checkglobalrestriction(asset_name))
+        assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
+
+        #unfreeze
+        owner_change_address = n0.getnewaddress()
+        freeze_hex = get_tx_freeze_asset_hex(n0, "unfreeze", asset_name, owner_change_address)
+        freeze_txid = n0.sendrawtransaction(freeze_hex)
+        n0.generate(1)
+
+        #verify
+        assert_equal(64, len(freeze_txid))
+        assert(not n0.checkglobalrestriction(asset_name))
+        assert_equal(1, n0.listassetbalancesbyaddress(owner_change_address)[f"{base_asset_name}!"])
+
     def run_test(self):
         self.activate_restricted_assets()
 
@@ -495,6 +561,7 @@ class RawRestrictedAssetsTest(RavenTestFramework):
         self.transfer_qualifier_test()
         self.address_tagging_test()
         self.address_freezing_test()
+        self.asset_freezing_test()
 
 if __name__ == '__main__':
     RawRestrictedAssetsTest().main()
