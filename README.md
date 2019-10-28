@@ -1,99 +1,58 @@
-Raven Core integration/staging tree
-=====================================
+by Buzzdave, Oct 23, 2019
 
-https://ravencoin.org
-
-What is Ravencoin?
+What is RVN v3?  I thought they just forked to v2?
 ----------------
 
-Ravencoin is an experimental digital currency that enables instant payments to
-anyone, anywhere in the world. Ravencoin uses peer-to-peer technology to operate
-with no central authority: managing transactions and issuing money are carried
-out collectively by the network. 
+RVN v3 is a testnet fork of the main Ravencoin code.
 
+The primary goal of this repo is to create a sandbox to introduce and field-test a more ASIC resistant concept of EI (Economic Infeasibility) and to get community support for a 2nd and final fork of Ravencoin to a mining algorithm that we (the community) believe is suitably resistant to the constant attack of ASIC miners.  Since FPGAs are typically the engineering precursors to ASICs, an algorithm that is highly compute oriented and feasible on FPGA tends to be highly feasible on ASIC.  Until now.  With the advent of HBM (High Bandwidth Memory), FPGA and GPU can both take advantage of memory bound algorithms to provide POW hashing for a blockchain.  Both FPGA and GPU are capable of significant compute outside of hashing, and in some case can provide the computing without interrupting the mining process.
 
+The more GPUs and FPGAs out in the world, the better.  They can be used for other types of computing, and those people who choose to opt-in by dedicating their hardware to this project will know that they won't find themselves holding useless hardware in the future.
 
 License
 -------
 
-Raven Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
+RVN Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
 information or see https://opensource.org/licenses/MIT.
 
 Development Process
 -------------------
 
-The `master` branch is regularly built and tested, but is not guaranteed to be
-completely stable. [Tags](https://github.com/RavenProject/Ravencoin/tags) are created
-regularly to indicate new official, stable release versions of Raven Core.
+This coin is a development sandbox.  It is not stable, nor are there releases available yet.  ***IT WILL BE RESET FREQUENTLY***
 
 The contribution workflow is described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Developer IRC can be found on Freenode at #raven-core-dev.
+
 
 Testing
 -------
 
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
+Testnet is planned, but not running.
 
-Testnet is now up and running and available to use during development. There is an issue when connecting to the testnet that requires the use of the -maxtipage parameter in order to connect to the test network initially. After the initial launch the -maxtipage parameter is not required.
+Main Net
+-------
 
-Use this command to initially start ravend on the testnet. <code>./ravend -testnet -maxtipage=259200</code>
-
-### Automated Testing
-
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled in configure) with: `make check`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
-
-There are also [regression and integration tests](/test), written
-in Python, that are run automatically on the build server.
-These tests can be run (if the [test dependencies](/test) are installed) with: `test/functional/test_runner.py`
-
-
-### Manual Quality Assurance (QA) Testing
-
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
-
-
-About Ravencoin
-----------------
-A digital peer to peer network for the facilitation of asset transfer.
-
-
-
-In the fictional world of Westeros, ravens are used as messengers who carry statements of truth. Ravencoin is a use case specific blockchain designed to carry statements of truth about who owns what assets. 
-
-
-
-Thank you to the Bitcoin developers. 
-
-The Ravencoin project is launched based on the hard work and continuous effort of over 400 Bitcoin developers who made over 14,000 commits over the life to date of the Bitcoin project. We are eternally grateful to you for your efforts and diligence in making a secure network and for their support of free and open source software development.  The Ravencoin experiment is made on the foundation you built.
+No MainNet is ever planned, so don't mine this coin thinking it will be anything other than a testbed for a future Ravecoin consensus fork.
 
 
 Abstract
 ----------------
-Ravencoin aims to implement a blockchain which is optimized specifically for the use case of transferring assets such as securities from one holder to another. Based on the extensive development and testing of Bitcoin, Ravencoin is built on a fork of the Bitcoin code. Key changes include a faster block reward time and a change in the number, but not weighed distribution schedule, of coins. Ravencoin is free and open source and will be issued and mined transparently with no pre-mine, developer allocation or any other similar set aside. Ravencoin is intended to prioritize user control, privacy and censorship resistance and be jurisdiction agnostic while allowing simple optional additional features for users based on need.
+Many POW (Proof of Work, i.e. mineable) blockchains attempt to keep their 
+network free of ASICs by designing complications into the algorithms that are difficult to engineer
+into dedicated silicon.  Some great work has been done by ProgPOW and RandomX developers, each in turn specializing for CPU and GPU.  To read more
+about their approaches to ASIC resistance, go to https://github.com/ifdefelse/ProgPOW and https://github.com/tevador/RandomX.
 
+ASICs (Application Specific Integrated Circuits) can be very powerful at hashing and very cheap to produce.
+This has been shown to create some difficult dynamics for many ecosystems.  51% attacks, only dreamed of when bitcoin first got its start, have been utilized to steal from exchanges and destroy upstart blockchains. Centralization of hashing power,
+pooling and mass manufacturing of high powered ASIC miners puts network consensus at risk.  To read more about the
+negative effects of ASICs on a POW blockchain, go to https://github.com/ifdefelse/ProgPOW#rationale-for-pow-on-commodity-hardware
 
+This project seeks to create and explore the ASIC Resistance concept of Economic Infeasibility.  EI Resistance asserts that, based on the number and size of the algorithms used in the POW protocol, we can force an arbitrarily high cost of design
+and manufacturing risk in an ASIC attempt.  EI doesn't try to produce algorithms that are too difficult to replicate in ASIC,
+it simply arranges and orders them in such a way that an ASIC would be too expensive to justify producing until the
+network were to achieve a arbitrarily high market cap.
 
-A blockchain is a ledger showing the value of something and allowing it to be transferred to someone else. Of all the possible uses for blockchains, the reporting of who owns what is one of the core uses of the technology.  This is why the first and most successful use case for blockchain technology to date has been Bitcoin.
-
-The success of the Ethereum ERC 20 token shows the demand for tokenized assets that use another blockchain.  Tokens offer many advantages to traditional shares or other participation mechanisms such as faster transfer, possibly increased user control and censorship resistance and reduction or elimination of the need for trusted third parties.
-
-Bitcoin also has the capability of serving as the rails for tokens by using projects such as Omnilayer, RSK or Counterparty. However, neither Bitcoin nor Ethereum was specifically designed for facilitating ownership of other assets. 
-
-Ravencoin is designed to be a use case specific blockchain designed to efficiently handle one specific function: the transfer of assets from one party to another.
-
-Bitcoin is and always should be focused on its goals of being a better form of money. Bitcoin developers will unlikely prioritize improvements or features which are specifically beneficial to the facilitation of token transfers.  One goal of the Ravencoin project is to see if a use case specific blockchain and development effort can create code which can either improve existing structures like Bitcoin or provide advantages for specific use cases.
-
-In the new global economy, borders and jurisdictions will be less relevant as more assets are tradable and trade across borders is increasingly frictionless. In an age where people can move significant amounts of wealth instantly using Bitcoin, global consumers will likely demand the same efficiency for their securities and similar asset holdings.
-
-For such a global system to work it will need to be independent of regulatory jurisdictions.  This is not due to ideological belief but practicality: if the rails for blockchain asset transfer are not censorship resistance and jurisdiction agnostic, any given jurisdiction may be in conflict with another.  In legacy systems, wealth was generally confined in the jurisdiction of the holder and therefore easy to control based on the policies of that jurisdiction. Because of the global nature of blockchain technology any protocol level ability to control wealth would potentially place jurisdictions in conflict and will not be able to operate fairly.  
+It can also be asserted that once a certain market cap has been achieved, the network will have grown to sufficient size
+as to not suffer the worst of the negative effects of ASICs.  This project hopes to promote the widespread deployment of 
+high performance GPU and FPGA cards (Field Programmable Gate Arrays are basically programmable chips).
 
