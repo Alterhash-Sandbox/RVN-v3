@@ -15,4 +15,4 @@ Eureka, Whitefire, GPUHoarder - technical, engineering, statistical analysis and
 13th December 2019
 </p>
 
-Read the Whitepaper <a href="https://github.com/Alterhash-Sandbox/rvnV3/blob/master/whitepaper/Alterhash%20-%20XDag16R%20v1.0.pdf">here</a>
+Read the Whitepaper <a href="https://github.com/Alterhash-Sandbox/rvnV3/blob/master/whitepaper/Alterhash%20-%20XDag16R%20v1.1.pdf">here</a>
